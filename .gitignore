@@ -20,6 +20,11 @@ torch_cuda.whl
 # Cache
 cache/
 
+# Tunnel
+bore.exe
+bore.zip
+bore_url.txt
+
 # Temp files
 _*.py
 _*.csv

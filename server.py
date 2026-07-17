@@ -22,11 +22,13 @@ SCHEMA = """Neo4j交通传感器知识图谱(LA高速公路, 207个传感器, 20
   趋势: avg_speed, congestion_ratio, morning_avg, evening_avg,
         offpeak_avg, peak_drop, weekday_avg, weekend_avg,
         worst_hour, worst_speed
+  天气: rain_speed_drop(雨天降速mph), rain_congestion_increase(雨天拥堵增幅%),
+        heavy_rain_drop(大雨降速), rain_hours(降雨时长)
 节点(POI, 259个): {name, type}
 关系:
   ROAD_DISTANCE {km}, NEAR {distance_m}, SIMILAR_TO {cluster}
 road_type: motorway=186, motorway_link=11, tertiary=7, primary=3
-平均速度58.5mph, 拥堵比例12%, 高峰降幅12mph, 周末比工作日快4.5mph
+平均速度58.5mph, 拥堵比例12%, 高峰降幅12mph, 雨天平均降速1.7mph, 拥堵+3.9%
 
 Cypher示例(严格参考):
 Q: 预测误差最大的5个传感器？-> MATCH (s:Sensor) RETURN s.sid, s.mae_60min ORDER BY s.mae_60min DESC LIMIT 5
@@ -35,7 +37,9 @@ Q: 拥堵最严重的前3个？-> MATCH (s:Sensor) RETURN s.sid, s.congestion_ra
 Q: 早晚高峰降幅最大的传感器？-> MATCH (s:Sensor) RETURN s.sid, s.peak_drop ORDER BY s.peak_drop DESC LIMIT 5
 Q: 哪个传感器POI最多？-> MATCH (s:Sensor)-[:NEAR]->(p:POI) RETURN s.sid, count(p) as cnt ORDER BY cnt DESC LIMIT 5
 Q: 全天通畅型传感器有多少？-> MATCH (s:Sensor) WHERE s.cluster='全天通畅型' RETURN count(s)
-Q: 传感器773869和谁模式最相似？-> MATCH (s:Sensor {sid:773869})-[:SIMILAR_TO]->(t) RETURN t.sid, t.cluster"""
+Q: 传感器773869和谁模式最相似？-> MATCH (s:Sensor {sid:773869})-[:SIMILAR_TO]->(t) RETURN t.sid, t.cluster
+Q: 下雨天降速最严重的5个传感器？-> MATCH (s:Sensor) RETURN s.sid, s.rain_speed_drop ORDER BY s.rain_speed_drop DESC LIMIT 5
+Q: 雨天拥堵增加最多的传感器？-> MATCH (s:Sensor) RETURN s.sid, s.rain_congestion_increase ORDER BY s.rain_congestion_increase DESC LIMIT 5"""
 
 def call_llm(messages):
     r = client.chat.completions.create(
