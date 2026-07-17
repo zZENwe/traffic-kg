@@ -50,11 +50,21 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
   <button id="btn" onclick="ask()">发送</button>
 </div>
 <script>
-function addMsg(role, text, cypher) {
+function addMsg(role, text, cypher, suggestions) {
   const d = document.createElement('div');
   d.className = `msg ${role}`;
+  let extra = '';
+  if (cypher) extra += `<div class="cypher-tag" title="${cypher.replace(/"/g,'&quot;')}">Cypher &#9654;</div>`;
+  if (suggestions) {
+    extra += '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">';
+    suggestions.split('\n').filter(s=>s.trim()).forEach(s=>{
+      const clean = s.replace(/^[•·\\-\\s]+/,'').trim();
+      extra += `<span onclick="document.getElementById('q').value='${clean.replace(/'/g,"\\'")}';ask()" style="cursor:pointer;padding:4px 10px;border-radius:12px;border:1px solid #e94560;font-size:12px;color:#e94560;background:rgba(233,69,96,0.1)">${clean}</span>`;
+    });
+    extra += '</div>';
+  }
   d.innerHTML = `<div class="avatar">${role==='user'?'你':'KG'}</div>
-    <div class="bubble">${text}${cypher?`<div class="cypher-tag" title="${cypher}">Cypher &#9654;</div>`:''}</div>`;
+    <div class="bubble">${text.replace(/\n/g,'<br>')}${extra}</div>`;
   document.getElementById('chat').appendChild(d);
   document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
 }
@@ -82,7 +92,7 @@ async function ask() {
     const d = await r.json();
     removeLoading();
     if (d.error) addMsg('bot', '错误: ' + d.error);
-    else addMsg('bot', d.answer, d.cypher);
+    else addMsg('bot', d.answer, d.cypher, d.suggestions);
   } catch(e) {
     removeLoading();
     addMsg('bot', '网络错误: ' + e.message);
