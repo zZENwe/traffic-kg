@@ -1,0 +1,35 @@
+# Secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Training outputs
+logs/
+logs_kg/
+*.pt
+
+# Data (too large for GitHub)
+data/METR-LA/
+data/metr-la.h5
+torch_cuda.whl
+
+# Cache
+cache/
+
+# Temp files
+_*.py
+_*.csv
+_*.txt
+_*.bat
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
