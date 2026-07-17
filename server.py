@@ -62,6 +62,93 @@ def query():
     if not question:
         return jsonify({'error': 'empty question'})
 
+    # === Reasoning Mode: multi-query deep analysis ===
+    reason_keywords = ['为什么', '原因', '分析', '推理', '怎么回事', '如何', '怎么这么',
+                       '风险', '危险', '建议', '改进', '对比', '综合', '深度']
+    if any(w in question for w in reason_keywords):
+        with driver.session() as session:
+            # Extract sensor ID if mentioned
+            import re
+            sids = re.findall(r'\b(\d{5,6})\b', question)
+            sid_filter = f"WHERE s.sid = {sids[0]}" if sids else ""
+
+            # Run 4 comprehensive queries
+            data = {}
+
+            # 1. Target sensor(s) detail
+            r = session.run(f"""
+                MATCH (s:Sensor) {sid_filter if sid_filter else ''}
+                OPTIONAL MATCH (s)-[:NEAR]->(p:POI)
+                RETURN s.sid as sid, s.road_type as road, s.cluster as cluster,
+                       s.congestion_ratio as cong, s.peak_drop as pd,
+                       s.morning_avg as ma, s.evening_avg as ea, s.offpeak_avg as oa,
+                       s.weekday_avg as wd, s.weekend_avg as we,
+                       s.mae_15min as m15, s.mae_30min as m30, s.mae_60min as m60,
+                       s.rain_speed_drop as rd, s.rain_congestion_increase as rci,
+                       s.worst_hour as wh, s.worst_speed as ws,
+                       s.avg_speed as spd, s.description as desc,
+                       collect(p.name)[0..5] as pois
+                ORDER BY s.congestion_ratio DESC LIMIT 5
+            """)
+            data['target'] = r.data()
+
+            # 2. Similar sensors for comparison
+            if sid_filter:
+                r = session.run(f"""
+                    MATCH (s:Sensor {{sid: {sids[0]}}})-[:SIMILAR_TO]->(t:Sensor)
+                    RETURN t.sid as sid, t.cluster as cluster, t.congestion_ratio as cong,
+                           t.peak_drop as pd, t.rain_speed_drop as rd
+                    LIMIT 5
+                """)
+                data['similar'] = r.data()
+
+            # 3. Road type & cluster averages
+            r = session.run("""
+                MATCH (s:Sensor)
+                RETURN s.road_type as road, s.cluster as cluster,
+                       count(s) as n, avg(s.congestion_ratio) as cong,
+                       avg(s.peak_drop) as pd, avg(s.rain_speed_drop) as rd,
+                       avg(s.mae_60min) as mae
+                ORDER BY n DESC
+            """)
+            data['averages'] = r.data()
+
+            # 4. Global extremes for context
+            r = session.run("""
+                MATCH (s:Sensor)
+                RETURN max(s.congestion_ratio) as max_cong,
+                       min(s.avg_speed) as min_speed,
+                       max(s.peak_drop) as max_pd,
+                       max(s.rain_speed_drop) as max_rd
+            """)
+            data['extremes'] = r.data()
+
+            cypher = 'REASONING_MODE'  # mark for response
+
+            # Build rich reasoning prompt
+            reason_prompt = f"""你是交通分析师AI。基于以下多维数据进行深度推理分析。要求:
+1. 先指出关键数据,再分析因果链条
+2. 横向对比同类传感器,指出异常值
+3. 给出1-2条可操作建议
+4. 结尾给出2-3个相关追问
+格式: [分析]...[建议]...---追问...
+
+背景: LA高速207个传感器,均值speed=58.5mph, cong=12%, peak_drop=12mph, rain_drop=1.7mph
+
+用户问题: {question}
+
+目标传感器数据: {json.dumps(data.get('target',[]), ensure_ascii=False, default=str)}
+相似传感器: {json.dumps(data.get('similar',[]), ensure_ascii=False, default=str)}
+分组统计: {json.dumps(data.get('averages',[]), ensure_ascii=False, default=str)}
+全局极值: {json.dumps(data.get('extremes',[]), ensure_ascii=False, default=str)}
+
+请分析:"""
+            answer = call_llm([{"role": "user", "content": reason_prompt}])
+            parts = answer.split('---', 1)
+            main = parts[0].strip()
+            sug = parts[1].strip() if len(parts) > 1 else ''
+            return jsonify({'answer': main, 'cypher': '多查询综合分析', 'suggestions': sug})
+
     # === Phase 1: Keyword-based Cypher templates (100% reliable for common queries) ===
     cypher = None
     q = question
@@ -193,5 +280,5 @@ def query():
     })
 
 if __name__ == '__main__':
-    print("启动服务: http://localhost:6060")
-    app.run(host='0.0.0.0', port=6060, debug=False)
+    print("启动服务: http://localhost:7070")
+    app.run(host='0.0.0.0', port=7070, debug=False)
