@@ -14,6 +14,12 @@ def _load_env(path=None):
 
 _load_env()
 
-NEO4J_URI = os.environ['NEO4J_URI']
-NEO4J_AUTH = (os.environ['NEO4J_USER'], os.environ['NEO4J_PASSWORD'])
-DEEPSEEK_KEY = os.environ['DEEPSEEK_KEY']
+def _get(key):
+    val = os.environ.get(key, '')
+    if not val:
+        raise RuntimeError(f"Missing {key}. Copy .env.example to .env and fill in your credentials.")
+    return val
+
+NEO4J_URI = _get('NEO4J_URI')
+NEO4J_AUTH = (_get('NEO4J_USER'), _get('NEO4J_PASSWORD'))
+DEEPSEEK_KEY = _get('DEEPSEEK_KEY')
