@@ -1,6 +1,37 @@
-# DCRNN 交通流量预测 + 知识图谱增强
+# 交通时空知识图谱 — LLM × Neo4j × DCRNN
 
-基于 **DCRNN**（Diffusion Convolutional Recurrent Neural Network, ICLR 2018）在 METR-LA 数据集上的交通流量预测复现，并引入**传感器空间知识图谱**进行知识增强。
+基于 **DCRNN** 交通预测 + **Neo4j 知识图谱** + **DeepSeek LLM** 的智能交通分析系统。中文提问，自动查图回答。
+
+## 下载后怎么跑？（给同学看的，30秒上手）
+
+### 第一步：装环境
+
+```bash
+conda create -n dcrnn python=3.11 -y
+conda activate dcrnn
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install numpy pandas scipy pyyaml h5py neo4j openai osmnx scikit-learn flask
+```
+
+### 第二步：拿密钥
+
+**找我（zzw）拿 `.env` 文件**，放到项目根目录。里面包含 Neo4j 数据库地址和 DeepSeek API 密钥。
+
+> 或者自己注册也行：Neo4j AuraDB 免费版 https://neo4j.com/cloud/aura/ + DeepSeek API https://platform.deepseek.com（充10块够用很久）。注册完照着 `.env.example` 的格式填。
+
+### 第三步：启动
+
+```bash
+conda activate dcrnn
+cd 项目目录
+python server.py
+```
+
+浏览器打开 **`http://localhost:7070`**，输入中文问题，回车。
+
+> 想分享给评委/同学用手机打开？装 bore（`choco install bore` 或用项目里自带的 `bore.exe`），然后跑 `bore local 7070 --to bore.pub`，会得到一个公网地址。
+
+---
 
 ## 项目结构
 
