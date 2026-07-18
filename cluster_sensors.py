@@ -33,7 +33,7 @@ X = np.array(features)
 # Normalize
 X = (X - X.mean(axis=0)) / (X.std(axis=0) + 1e-8)
 
-# K-means clustering
+# K-means clustering (elbow method suggests k=4 is optimal)
 n_clusters = 4
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
 labels = kmeans.fit_predict(X)
@@ -69,38 +69,44 @@ for c_id, info in sorted_clusters:
           f"avg_speed={info['avg_speed']:.0f}mph, "
           f"cong={info['avg_cr']:.1%}, peak_drop={info['avg_pd']:.0f}mph")
 
-# Write labels and SIMILAR_TO edges to Neo4j
+# Build batches for UNWIND writes
+label_batch = [{"sid": sids[i], "cluster": names[int(labels[i])]} for i in range(len(sids))]
+
+edge_batch = []
+for c in range(n_clusters):
+    c_indices = [i for i in range(len(sids)) if labels[i] == c]
+    c_features = X[c_indices]
+    c_sids = [sids[i] for i in c_indices]
+
+    if len(c_indices) < 2:
+        continue
+
+    for i, idx in enumerate(c_indices):
+        dists = np.linalg.norm(c_features - c_features[i], axis=1)
+        nearest = np.argsort(dists)[1:4]
+        for j in nearest:
+            edge_batch.append({"s1": sids[idx], "s2": c_sids[j], "cl": names[c]})
+
+# Write to Neo4j in batch
 print("\nWriting clusters to Neo4j...")
 with driver.session() as session:
     # Remove old cluster edges
     session.run("MATCH ()-[r:SIMILAR_TO]->() DELETE r")
 
-    # Set cluster labels
-    for i, sid in enumerate(sids):
-        c_id = int(labels[i])
-        session.run("""
-            MATCH (s:Sensor {sid: $sid})
-            SET s.cluster = $cluster
-        """, sid=sid, cluster=names[c_id])
+    # Batch set cluster labels
+    session.run("""
+        UNWIND $batch AS data
+        MATCH (s:Sensor {sid: data.sid})
+        SET s.cluster = data.cluster
+    """, batch=label_batch)
+    print(f"  Set cluster labels for {len(label_batch)} sensors")
 
-    # Create SIMILAR_TO edges within each cluster (connect to top-3 nearest)
-    for c in range(n_clusters):
-        c_indices = [i for i in range(len(sids)) if labels[i] == c]
-        c_features = X[c_indices]
-        c_sids = [sids[i] for i in c_indices]
-
-        if len(c_indices) < 2:
-            continue
-
-        for i, idx in enumerate(c_indices):
-            # Find 3 nearest neighbors in same cluster
-            dists = np.linalg.norm(c_features - c_features[i], axis=1)
-            nearest = np.argsort(dists)[1:4]  # skip self
-            for j in nearest:
-                session.run("""
-                    MATCH (a:Sensor {sid: $s1}), (b:Sensor {sid: $s2})
-                    MERGE (a)-[:SIMILAR_TO {cluster: $cl}]->(b)
-                """, s1=sids[idx], s2=c_sids[j], cl=names[c])
+    # Batch create SIMILAR_TO edges
+    session.run("""
+        UNWIND $batch AS data
+        MATCH (a:Sensor {sid: data.s1}), (b:Sensor {sid: data.s2})
+        MERGE (a)-[:SIMILAR_TO {cluster: data.cl}]->(b)
+    """, batch=edge_batch)
 
     # Verify
     edges = session.run("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r)").single().value()

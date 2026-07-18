@@ -43,7 +43,6 @@ print(f"  Distribution: {pd.Series(road_types).value_counts().to_dict()}")
 
 # === 3. Download POIs by sub-regions ===
 print("\n[3/3] Downloading POIs by sub-regions...")
-# Divide area into 3x3 grid
 sub_centers = []
 for lat_c in np.linspace(lats.min(), lats.max(), 3):
     for lon_c in np.linspace(lons.min(), lons.max(), 3):
@@ -51,7 +50,7 @@ for lat_c in np.linspace(lats.min(), lats.max(), 3):
 
 all_pois = []
 for j, sc in enumerate(sub_centers):
-    radius = 6000  # 6km per cell covers the ~20x35km area with 3x3 grid
+    radius = 6000
     try:
         pois = ox.features_from_point(sc, dist=radius, tags={
             'amenity': True, 'shop': True, 'leisure': True,
@@ -97,38 +96,41 @@ for i, pt in enumerate(sensor_points):
 avg_pois = np.mean([len(p) for p in sensor_pois])
 print(f"  Avg POIs per sensor: {avg_pois:.1f}")
 
-# === 5. Write to Neo4j ===
+# === 5. Write to Neo4j (batch) ===
 print("\n--- Writing to Neo4j ---")
 driver = GraphDatabase.driver(URI, auth=AUTH)
 driver.verify_connectivity()
 
 with driver.session() as session:
-    # Remove old POI data if any
+    # Remove old POI data
     session.run("MATCH (n:POI) DETACH DELETE n")
 
-    for idx, row in sensors.iterrows():
-        sid = int(row['sensor_id'])
-        session.run("MATCH (s:Sensor {sid: $sid}) SET s.road_type = $rt",
-                    sid=sid, rt=row['road_type'])
+    # Batch set road_type for all sensors
+    rt_batch = [{"sid": int(row['sensor_id']), "rt": row['road_type']}
+                for idx, row in sensors.iterrows()]
+    session.run("""
+        UNWIND $batch AS data
+        MATCH (s:Sensor {sid: data.sid})
+        SET s.road_type = data.rt
+    """, batch=rt_batch)
     print(f"  Set road_type for {n} sensors")
 
-    poi_nodes, rel_edges = 0, 0
+    # Build POI batch
+    poi_batch = []
     seen_poi = set()
     for i, row in sensors.iterrows():
         sid = int(row['sensor_id'])
         for name, poi_type, dist in sensor_pois[i]:
-            key = (name, poi_type)
-            session.run("""
-                MATCH (s:Sensor {sid: $sid})
-                MERGE (p:POI {name: $name, type: $type})
-                MERGE (s)-[:NEAR {distance_m: $dist}]->(p)
-            """, sid=sid, name=name, type=poi_type, dist=dist)
-            rel_edges += 1
-            if key not in seen_poi:
-                seen_poi.add(key)
-                poi_nodes += 1
+            poi_batch.append({"sid": sid, "name": name, "type": poi_type, "dist": dist})
+            seen_poi.add((name, poi_type))
 
-    print(f"  {poi_nodes} unique POI nodes, {rel_edges} NEAR edges")
+    session.run("""
+        UNWIND $batch AS data
+        MATCH (s:Sensor {sid: data.sid})
+        MERGE (p:POI {name: data.name, type: data.type})
+        MERGE (s)-[:NEAR {distance_m: data.dist}]->(p)
+    """, batch=poi_batch)
+    print(f"  {len(seen_poi)} unique POI nodes, {len(poi_batch)} NEAR edges")
 
     # Final stats
     nodes_c = session.run("MATCH (n) RETURN count(n)").single().value()

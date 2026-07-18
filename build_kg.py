@@ -28,27 +28,32 @@ with driver.session() as session:
     # Clear old data
     session.run("MATCH (n) DETACH DELETE n")
 
-    # Create 207 sensor nodes
-    for idx, row in sensors.iterrows():
-        session.run("""
-            CREATE (s:Sensor {sid: $sid, lat: $lat, lon: $lon})
-        """, sid=int(row['sensor_id']),
-            lat=float(row['latitude']), lon=float(row['longitude']))
+    # Batch create 207 sensor nodes
+    sensor_batch = [{"sid": int(row['sensor_id']), "lat": float(row['latitude']),
+                      "lon": float(row['longitude'])} for idx, row in sensors.iterrows()]
+    session.run("""
+        UNWIND $batch AS data
+        CREATE (s:Sensor {sid: data.sid, lat: data.lat, lon: data.lon})
+    """, batch=sensor_batch)
+    print(f"  Created {n} Sensor nodes")
 
-    # Create top-5 nearest for each (excluding self)
-    edge_count = 0
+    # Batch create top-5 nearest edges for each sensor
+    edge_batch = []
     for i in range(n):
-        nearest = np.argsort(geo_dist[i])[1:6]  # skip self (idx 0)
+        nearest = np.argsort(geo_dist[i])[1:6]  # skip self
         for j in nearest:
-            d = round(float(geo_dist[i, j]), 3)
-            edge_count += 1
-            session.run("""
-                MATCH (a:Sensor {sid: $si}), (b:Sensor {sid: $sj})
-                CREATE (a)-[:ROAD_DISTANCE {km: $d}]->(b)
-            """, si=int(sensors.iloc[i]['sensor_id']),
-                sj=int(sensors.iloc[int(j)]['sensor_id']), d=d)
+            edge_batch.append({
+                "si": int(sensors.iloc[i]['sensor_id']),
+                "sj": int(sensors.iloc[int(j)]['sensor_id']),
+                "d": round(float(geo_dist[i, j]), 3),
+            })
 
-    print(f"Created {n} nodes, {edge_count} edges")
+    session.run("""
+        UNWIND $batch AS data
+        MATCH (a:Sensor {sid: data.si}), (b:Sensor {sid: data.sj})
+        CREATE (a)-[:ROAD_DISTANCE {km: data.d}]->(b)
+    """, batch=edge_batch)
+    print(f"  Created {len(edge_batch)} ROAD_DISTANCE edges")
 
 driver.close()
 

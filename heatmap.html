@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LA交通传感器时空热力图 — METR-LA 2012</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #0a0e1a; color: #eee; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+
+.title-bar { text-align: center; padding: 20px 20px 10px; }
+.title-bar h1 { font-size: 22px; font-weight: 500; color: #e94560; letter-spacing: 2px; }
+.title-bar .sub { font-size: 13px; color: #666; margin-top: 4px; }
+.title-bar .sub span { color: #888; margin: 0 8px; }
+
+.main-container { position: relative; width: 95vw; max-width: 1200px; }
+
+/* Stats strip at top */
+.stats-row { display: flex; gap: 16px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+.stat-card { background: #13182b; border: 1px solid #1a2040; border-radius: 10px; padding: 10px 18px; text-align: center; min-width: 100px; }
+.stat-card .val { font-size: 22px; font-weight: 600; color: #e94560; }
+.stat-card .lbl { font-size: 11px; color: #666; margin-top: 2px; }
+
+.canvas-wrap { position: relative; width: 100%; background: #0a0e1a; border: 1px solid #1a2040; border-radius: 10px; overflow: hidden; }
+.canvas-wrap canvas { display: block; width: 100%; height: auto; }
+
+/* Speed legend overlay */
+.legend-overlay { position: absolute; bottom: 60px; right: 16px; background: rgba(10,14,26,0.9); border: 1px solid #1a2040; border-radius: 8px; padding: 10px 14px; font-size: 11px; }
+.legend-overlay .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); }
+.legend-bar { width: 80px; height: 6px; border-radius: 3px; background: linear-gradient(to right, #ef4444, #eab308, #22c55e); }
+
+/* Controls bar */
+.controls { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: #0f1425; border: 1px solid #1a2040; border-top: none; border-radius: 0 0 10px 10px; }
+.btn { padding: 6px 18px; border-radius: 14px; border: 1px solid #0f3460; background: #16213e; color: #ccc; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+.btn:hover { border-color: #e94560; color: #e94560; }
+.btn.playing { border-color: #e94560; color: #e94560; background: rgba(233,69,96,0.12); }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.slider { flex: 1; -webkit-appearance: none; height: 5px; border-radius: 3px; background: #1a2040; outline: none; }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #e94560; cursor: pointer; }
+.time-display { font-size: 14px; color: #e94560; min-width: 100px; text-align: center; font-family: 'Consolas','Courier New',monospace; font-weight: 500; }
+.speed-badge { font-size: 12px; color: #888; }
+
+/* Fullscreen */
+.fs-hint { position: absolute; top: 12px; right: 16px; font-size: 11px; color: #444; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="title-bar">
+  <h1>洛杉矶高速交通传感器 — 时空热力图</h1>
+  <div class="sub">METR-LA Dataset<span>·</span>207 Sensors<span>·</span>March–June 2012<span>·</span>1-Hour Interval</div>
+</div>
+
+<div class="main-container">
+  <div class="stats-row">
+    <div class="stat-card"><div class="val" id="stat-time">--</div><div class="lbl">当前时刻</div></div>
+    <div class="stat-card"><div class="val" id="stat-avg">--</div><div class="lbl">全网均速 (mph)</div></div>
+    <div class="stat-card"><div class="val" id="stat-cong">--</div><div class="lbl">拥堵传感器</div></div>
+    <div class="stat-card"><div class="val" id="stat-fast">--</div><div class="lbl">通畅传感器</div></div>
+  </div>
+
+  <div class="canvas-wrap" id="canvas-wrap">
+    <canvas id="c"></canvas>
+    <div class="legend-overlay">
+      <div class="row"><span class="legend-dot" style="background:#22c55e"></span> 通畅 ≥60 mph</div>
+      <div class="row"><span class="legend-dot" style="background:#eab308"></span> 中等 40–60 mph</div>
+      <div class="row"><span class="legend-dot" style="background:#ef4444"></span> 拥堵 &lt;40 mph</div>
+      <div style="margin-top:4px"><div class="legend-bar"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#555"><span>0</span><span>70 mph</span></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btn-play" onclick="toggle()" disabled>播放</button>
+    <button class="btn" id="btn-slower" onclick="setSpeed(-0.15)" disabled>◀◀</button>
+    <button class="btn" id="btn-faster" onclick="setSpeed(0.15)" disabled>▶▶</button>
+    <input type="range" class="slider" id="slider" min="0" max="100" value="0" oninput="seek(parseInt(this.value))" disabled>
+    <span class="time-display" id="time-label">加载中...</span>
+    <span class="speed-badge" id="speed-label">1.0x</span>
+    <button class="btn" id="btn-full" onclick="goFullscreen()" disabled>全屏</button>
+  </div>
+</div>
+
+<script>
+// ---- Data ----
+var DATA = null;
+var state = { frame: 0, total: 0, playing: false, timer: null, speed: 1.0, pos: null, edges: null, sidMap: null };
+
+function speedColor(spd) {
+  if (spd <= 0) return [60,60,60,0.3];
+  var t = Math.max(0, Math.min(1, spd / 70));
+  if (t < 0.5) { s = t/0.5; return [239, Math.round(68+s*167), 68, 0.85]; }
+  else { s = (t-0.5)/0.5; return [Math.round(239-s*205), Math.round(235-s*38), 68, 0.85]; }
+}
+
+function loadData() {
+  fetch('/api/timeseries').then(function(r) { return r.json(); }).then(function(d) {
+    DATA = d;
+    state.total = d.speeds.length;
+    state.frame = 0;
+    buildGeometry();
+    draw();
+
+    // Update slider
+    var s = document.getElementById('slider');
+    s.max = state.total - 1;
+    s.value = 0;
+
+    // Enable controls
+    document.getElementById('btn-play').disabled = false;
+    document.getElementById('btn-slower').disabled = false;
+    document.getElementById('btn-faster').disabled = false;
+    document.getElementById('slider').disabled = false;
+    document.getElementById('btn-full').disabled = false;
+    document.getElementById('time-label').textContent = d.timestamps[0];
+    updateStats(0);
+  }).catch(function(e) { console.error(e); document.getElementById('time-label').textContent = '加载失败'; });
+}
+
+function buildGeometry() {
+  var s = DATA.sensors;
+  var lats = s.map(function(x) { return x.lat; }), lons = s.map(function(x) { return x.lon; });
+  var pad = 20;
+  state.xScale = function(lon) { return pad + (lon - Math.min.apply(null, lons)) / (Math.max.apply(null, lons) - Math.min.apply(null, lons)) * (state.w - 2*pad); };
+  state.yScale = function(lat) { return pad + (Math.max.apply(null, lats) - lat) / (Math.max.apply(null, lats) - Math.min.apply(null, lats)) * (state.h - 2*pad); };
+  state.pos = s.map(function(x) { return { x: state.xScale(x.lon), y: state.yScale(x.lat) }; });
+  state.sidMap = {};
+  s.forEach(function(x, i) { state.sidMap[x.sid] = i; });
+  state.edges = [];
+  DATA.edges.forEach(function(e) {
+    var fi = state.sidMap[e.from], ti = state.sidMap[e.to];
+    if (fi !== undefined && ti !== undefined) state.edges.push({ from: fi, to: ti });
+  });
+}
+
+function draw() {
+  var canvas = document.getElementById('c');
+  var wrap = document.getElementById('canvas-wrap');
+  var w = wrap.clientWidth;
+  var h = Math.round(w * 0.65);
+  state.w = w; state.h = h;
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  if (!DATA) {
+    ctx.fillStyle = '#0a0e1a';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#444';
+    ctx.font = '16px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('加载数据中...', w/2, h/2);
+    return;
+  }
+
+  var speeds = DATA.speeds[state.frame];
+  var pos = state.pos;
+
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fillRect(0, 0, w, h);
+
+  // Edges
+  ctx.strokeStyle = 'rgba(15,52,96,0.3)';
+  ctx.lineWidth = 0.4;
+  state.edges.forEach(function(e) {
+    var a = pos[e.from], b = pos[e.to];
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  });
+
+  // Nodes
+  var pos = state.pos;
+  for (var i = 0; i < 207; i++) {
+    var spd = speeds[i];
+    var c = speedColor(spd);
+    var r = 2.5 + (1 - Math.max(0, Math.min(1, spd/70))) * 5;
+    ctx.beginPath();
+    ctx.arc(pos[i].x, pos[i].y, Math.max(2, r), 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + c[3] + ')';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 0.3;
+    ctx.stroke();
+  }
+}
+
+function updateStats(frame) {
+  var speeds = DATA.speeds[frame];
+  var valid = speeds.filter(function(v) { return v > 0; });
+  var avg = valid.reduce(function(a,b) { return a+b; }, 0) / valid.length;
+  var cong = speeds.filter(function(v) { return v > 0 && v < 40; }).length;
+  var fast = speeds.filter(function(v) { return v >= 60; }).length;
+  document.getElementById('stat-time').textContent = DATA.timestamps[frame];
+  document.getElementById('stat-avg').textContent = avg.toFixed(1) + ' mph';
+  document.getElementById('stat-cong').textContent = cong;
+  document.getElementById('stat-fast').textContent = fast;
+  document.getElementById('time-label').textContent = DATA.timestamps[frame];
+  document.getElementById('slider').value = frame;
+}
+
+function goFrame(f) {
+  state.frame = f % state.total;
+  if (state.frame < 0) state.frame += state.total;
+  draw();
+  updateStats(state.frame);
+}
+
+function toggle() {
+  if (state.playing) { pause(); return; }
+  state.playing = true;
+  document.getElementById('btn-play').textContent = '暂停';
+  document.getElementById('btn-play').classList.add('playing');
+  tick();
+}
+
+function pause() {
+  state.playing = false;
+  if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+  document.getElementById('btn-play').textContent = '播放';
+  document.getElementById('btn-play').classList.remove('playing');
+}
+
+function tick() {
+  if (!state.playing) return;
+  goFrame(state.frame + 1);
+  var delay = Math.round(200 / state.speed);
+  state.timer = setTimeout(tick, Math.max(30, delay));
+}
+
+function seek(f) { goFrame(f); }
+
+function setSpeed(delta) {
+  state.speed = Math.max(0.25, Math.min(4, state.speed + delta));
+  document.getElementById('speed-label').textContent = state.speed.toFixed(2) + 'x';
+  if (state.playing) { pause(); toggle(); }
+}
+
+function goFullscreen() {
+  var el = document.getElementById('canvas-wrap');
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+
+function resize() { buildGeometry(); draw(); updateStats(state.frame); }
+window.addEventListener('resize', resize);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+  if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); toggle(); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); goFrame(state.frame - 1); pause(); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goFrame(state.frame + 1); pause(); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); setSpeed(0.25); }
+  if (e.key === 'ArrowDown') { e.preventDefault(); setSpeed(-0.25); }
+  if (e.key === 'f' || e.key === 'F') goFullscreen();
+});
+
+loadData();
+</script>
+</body>
+</html>

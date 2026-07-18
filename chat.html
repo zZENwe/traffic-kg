@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>交通时空知识图谱 - 智能查询</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
@@ -20,12 +23,50 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
 .bubble { padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; }
 .msg.user .bubble { background: #e94560; color: #fff; border-bottom-right-radius: 4px; }
 .msg.bot .bubble { background: #16213e; border: 1px solid #0f3460; border-bottom-left-radius: 4px; }
-.cypher-tag { font-size: 11px; color: #e94560; margin-top: 6px; opacity: 0.8; cursor: pointer; }
-.cypher-tag:hover { opacity: 1; }
+.source-btn { display: inline-block; margin-top: 8px; padding: 5px 12px; border-radius: 12px;
+  border: 1px solid #0f3460; background: #0a0e1a; color: #888; font-size: 12px;
+  cursor: pointer; transition: all 0.2s; }
+.source-btn:hover { border-color: #e94560; color: #e94560; }
+.source-btn.active { border-color: #e94560; color: #e94560; background: rgba(233,69,96,0.08); }
+.source-panel { display: none; margin-top: 6px; background: #0a0e1a; border: 1px solid #0f3460;
+  border-radius: 8px; overflow: hidden; }
+.source-panel.show { display: block; }
+.source-tabs { display: flex; border-bottom: 1px solid #0f3460; }
+.source-tab { flex: 1; padding: 6px 10px; text-align: center; font-size: 12px; color: #888;
+  cursor: pointer; background: #0a0e1a; border: none; transition: all 0.2s; }
+.source-tab:hover { color: #ccc; }
+.source-tab.active { color: #e94560; border-bottom: 2px solid #e94560; }
+.source-content { padding: 10px 12px; max-height: 280px; overflow: auto; }
+.source-content pre { font-size: 11px; line-height: 1.5; color: #aaa; white-space: pre-wrap;
+  word-break: break-all; margin: 0; font-family: 'Consolas','Courier New',monospace; }
+.source-content table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.source-content th { background: #16213e; padding: 4px 8px; text-align: left; color: #e94560;
+  font-weight: 500; border-bottom: 1px solid #0f3460; position: sticky; top: 0; }
+.source-content td { padding: 3px 8px; border-bottom: 1px solid #0f3460; color: #aaa; }
+.source-content .val { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-container { height: 260px; width: 100%; border-radius: 6px; }
+.chart-container { position: relative; height: 250px; width: 100%; }
+.chart-container canvas { max-height: 250px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.suggestions span { cursor: pointer; padding: 4px 10px; border-radius: 12px;
+  border: 1px solid #e94560; font-size: 12px; color: #e94560;
+  background: rgba(233,69,96,0.1); transition: all 0.2s; }
+.suggestions span:hover { background: rgba(233,69,96,0.25); }
 .loading .dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #888; margin: 0 2px; animation: dot 1.4s infinite ease-in-out both; }
 .loading .dots span:nth-child(1) { animation-delay: -0.32s; }
 .loading .dots span:nth-child(2) { animation-delay: -0.16s; }
 @keyframes dot { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
+.heatmap-wrap { position: relative; width: 100%; height: 300px; background: #0a0e1a; border-radius: 6px; overflow: hidden; }
+.heatmap-wrap canvas { display: block; }
+.hm-controls { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #0f1425; border-top: 1px solid #1a2040; }
+.hm-btn { padding: 4px 14px; border-radius: 12px; border: 1px solid #0f3460; background: #16213e; color: #ccc; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+.hm-btn:hover { border-color: #e94560; color: #e94560; }
+.hm-btn.playing { border-color: #e94560; color: #e94560; background: rgba(233,69,96,0.1); }
+.hm-slider { flex: 1; -webkit-appearance: none; height: 4px; border-radius: 2px; background: #0f3460; outline: none; }
+.hm-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #e94560; cursor: pointer; }
+.hm-time { font-size: 12px; color: #e94560; min-width: 90px; text-align: center; font-family: 'Consolas',monospace; }
+.hm-legend { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #666; padding: 0 12px 6px; }
+.hm-legend-bar { width: 80px; height: 6px; border-radius: 3px; background: linear-gradient(to right, #22c55e, #eab308, #ef4444); }
 .input-area { padding: 14px 20px; background: #16213e; border-top: 1px solid #0f3460; display: flex; gap: 10px; }
 .input-area input { flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid #0f3460; background: #1a1a2e; color: #eee; font-size: 14px; outline: none; }
 .input-area input:focus { border-color: #e94560; }
@@ -42,7 +83,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
 <div class="chat" id="chat">
   <div class="msg bot">
     <div class="avatar">KG</div>
-    <div class="bubble">你好！我是交通时空知识图谱助手。<br>可以问我传感器、道路类型、预测误差、POI 等问题。<br><br>试试：<br>• "高速公路传感器平均误差多少？"<br>• "预测最难的5个传感器在哪？"<br>• "周边餐厅最多的传感器？"</div>
+    <div class="bubble">你好！我是交通时空知识图谱助手。<br>可以问我传感器、道路类型、预测误差、POI 等问题。<br><br>试试：<br>· "高速公路传感器平均误差多少？"<br>· "预测最难的5个传感器在哪？"<br>· "周边餐厅最多的传感器？"</div>
   </div>
 </div>
 <div class="input-area">
@@ -50,49 +91,571 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
   <button id="btn" onclick="ask()">发送</button>
 </div>
 <script>
-function addMsg(role, text, cypher, suggestions) {
-  const d = document.createElement('div');
-  d.className = `msg ${role}`;
-  let extra = '';
-  if (cypher) extra += `<div class="cypher-tag" title="${cypher.replace(/"/g,'&quot;')}">Cypher &#9654;</div>`;
+var msgId = 0;
+var chartInstances = {};  // per-message chart refs
+var mapInstances = {};    // per-message map refs
+
+function hasCoords(records) {
+  if (!records || !records.length) return false;
+  var r = records[0];
+  return (r.lat && r.lon) || (r.latitude && r.longitude);
+}
+
+function hasNumeric(records) {
+  if (!records || !records.length) return false;
+  var r = records[0];
+  var numKeys = Object.keys(r).filter(function(k) {
+    return typeof r[k] === 'number' && k !== 'sid' && k !== 'lat' && k !== 'lon' && k !== 'latitude' && k !== 'longitude';
+  });
+  return numKeys.length >= 1;
+}
+
+function buildMap(id, records) {
+  var pts = [];
+  records.forEach(function(r) {
+    var lat = r.lat || r.latitude;
+    var lon = r.lon || r.longitude;
+    if (lat && lon) pts.push({lat: lat, lon: lon, sid: r.sid, road: r.road_type || '', cluster: r.cluster || '', val: formatTopValue(r)});
+  });
+  if (!pts.length) return false;
+
+  var bounds = pts.reduce(function(b, p) {
+    return {minLat: Math.min(b.minLat, p.lat), maxLat: Math.max(b.maxLat, p.lat),
+            minLon: Math.min(b.minLon, p.lon), maxLon: Math.max(b.maxLon, p.lon)};
+  }, {minLat: 90, maxLat: -90, minLon: 180, maxLon: -180});
+
+  // Small delay to ensure DOM is ready
+  setTimeout(function() {
+    var mapDiv = document.getElementById(id + '-map');
+    if (!mapDiv) return;
+    mapDiv.innerHTML = '<div class="map-container" id="' + id + '-leaflet"></div>';
+    var map = L.map(id + '-leaflet').setView([(bounds.minLat + bounds.maxLat) / 2, (bounds.minLon + bounds.maxLon) / 2], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OSM', maxZoom: 18
+    }).addTo(map);
+    if (pts.length > 1) {
+      map.fitBounds([[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]], {padding: [20, 20]});
+    } else {
+      map.setView([pts[0].lat, pts[0].lon], 15);
+    }
+    mapInstances[id] = map;
+    pts.forEach(function(p) {
+      var roadCN = SENSOR_ROAD_LABELS[p.road] || p.road;
+      var popup = '<b>传感器 #' + p.sid + '</b><br>' + roadCN + ' · ' + p.cluster + '<br>' + p.val;
+      L.circleMarker([p.lat, p.lon], {
+        radius: 7, fillColor: '#e94560', color: '#fff', weight: 1.5, fillOpacity: 0.85
+      }).bindPopup(popup).addTo(map);
+    });
+  }, 100);
+  return true;
+}
+
+function formatTopValue(r) {
+  var keys = ['congestion_ratio','avg_speed','mae_60min','mae_30min','mae_15min','peak_drop','morning_avg','evening_avg','weekday_avg','weekend_avg','rain_speed_drop','rain_congestion_increase'];
+  for (var i = 0; i < keys.length; i++) {
+    if (r[keys[i]] !== undefined) return cn(keys[i]) + ': ' + fmtVal(keys[i], r[keys[i]]);
+  }
+  return '';
+}
+
+function buildChart(id, records, cypher) {
+  var numKeys = Object.keys(records[0]).filter(function(k) {
+    return typeof records[0][k] === 'number' && k !== 'sid' && k !== 'lat' && k !== 'lon' && k !== 'latitude' && k !== 'longitude';
+  });
+  if (!numKeys.length) {
+    // Try sid as label + one numeric
+    var keys = Object.keys(records[0]);
+    var numK = keys.filter(function(k) { return typeof records[0][k] === 'number'; });
+    var labelK = keys.filter(function(k) { return k === 'sid' || k === 'road_type' || k === 'cluster' || k === 'h' || k === 'road' || k === 'type'; });
+    if (!numK.length || !labelK.length) return false;
+    numKeys = numK;
+  }
+
+  setTimeout(function() {
+    var chartDiv = document.getElementById(id + '-chart');
+    if (!chartDiv) return;
+    chartDiv.innerHTML = '<div class="chart-container"><canvas id="' + id + '-canvas"></canvas></div>';
+    var ctx = document.getElementById(id + '-canvas').getContext('2d');
+
+    var labels = records.map(function(r) { return r.sid || cn(r.road_type || r.cluster || r.road || r.h || r.type) || '#'; });
+    var key = numKeys[0];
+
+    if (chartInstances[id]) chartInstances[id].destroy();
+    chartInstances[id] = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: cn(key),
+          data: records.map(function(r) { return r[key]; }),
+          backgroundColor: records.map(function(_, i) {
+            return 'hsla(' + (350 + i * 15 % 30) + ', 70%, 55%, 0.75)';
+          }),
+          borderColor: 'rgba(233,69,96,0.6)',
+          borderWidth: 1,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#888', font: { size: 11 } } }
+        },
+        scales: {
+          x: { ticks: { color: '#888', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1a1a3e' } },
+          y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#1a1a3e' } }
+        }
+      }
+    });
+  }, 100);
+  return true;
+}
+
+// Chinese labels & units for all Neo4j sensor fields
+var LABEL_CN = {
+  sid: '传感器ID', lat: '纬度', lon: '经度', road_type: '道路类型', cluster: '聚类', description: '描述',
+  avg_speed: '平均速度', congestion_ratio: '拥堵率', peak_drop: '高峰降幅',
+  morning_avg: '早高峰均速', evening_avg: '晚高峰均速', offpeak_avg: '平峰均速',
+  weekday_avg: '工作日均速', weekend_avg: '周末均速',
+  worst_hour: '最堵时段', worst_speed: '最堵时速',
+  mae_15min: '15min误差', mae_30min: '30min误差', mae_60min: '60min误差',
+  rain_speed_drop: '雨天降速', rain_congestion_increase: '雨天拥堵增幅',
+  heavy_rain_drop: '暴雨降速', rain_hours: '雨天时长',
+  road: '道路类型', cong: '拥堵率', pd: '高峰降幅', rd: '雨天降速',
+  ma: '早高峰均速', ea: '晚高峰均速', oa: '平峰均速', wd: '工作日均速', we: '周末均速',
+  spd: '均速', m15: '15min误差', m30: '30min误差', m60: '60min误差',
+  mae: '60min误差', rci: '雨天拥堵增幅', wh: '最堵时段', ws: '最堵时速',
+  n: '数量', h: '小时', total: '传感器总数', max_cong: '最高拥堵率',
+  min_speed: '最低速度', max_pd: '最大高峰降幅', max_rd: '最大雨天降速',
+  count: '数量', name: '名称', type: '类型', distance_m: '距离(m)', km: '距离(km)',
+  pois: '周边POI', similar: '相似传感器', fileName: '文件名', fileSource: '来源',
+  source: '数据来源', entities: '关联实体'
+};
+
+var UNIT_OF = {
+  avg_speed: 'mph', morning_avg: 'mph', evening_avg: 'mph', offpeak_avg: 'mph',
+  weekday_avg: 'mph', weekend_avg: 'mph', worst_speed: 'mph', spd: 'mph',
+  ma: 'mph', ea: 'mph', oa: 'mph', wd: 'mph', we: 'mph', ws: 'mph',
+  min_speed: 'mph', speed: 'mph',
+  mae_15min: 'mph', mae_30min: 'mph', mae_60min: 'mph',
+  m15: 'mph', m30: 'mph', m60: 'mph', mae: 'mph',
+  peak_drop: 'mph', pd: 'mph', rain_speed_drop: 'mph', rd: 'mph',
+  heavy_rain_drop: 'mph',
+  congestion_ratio: '%', cong: '%', rain_congestion_increase: '%', rci: '%',
+  worst_hour: '时', wh: '时',
+  distance_m: 'm', km: 'km',
+  lat: '°', lon: '°'
+};
+
+var SENSOR_ROAD_LABELS = { motorway: '高速公路', motorway_link: '匝道', primary: '主干道', tertiary: '三级路', trunk: '快速路' };
+var CLUSTER_LABELS = { '全天通畅型': '全天通畅', '高峰敏感型': '高峰敏感', '高频拥堵型': '高频拥堵', '中等波动型': '中等波动' };
+
+function cn(k) { return LABEL_CN[k] || k; }
+
+function fmtVal(k, v) {
+  if (v === null || v === undefined || v === '') return '-';
+  if (k === 'road_type' || k === 'road') return SENSOR_ROAD_LABELS[v] || v;
+  if (k === 'cluster') return CLUSTER_LABELS[v] || v;
+  if (k === 'worst_hour' || k === 'wh') return v + ':00';
+  if (typeof v === 'number') {
+    var u = UNIT_OF[k] || '';
+    if (u === '%') return (v * 100).toFixed(1) + '%';
+    return parseFloat(v.toFixed(1)) + (u ? ' ' + u : '');
+  }
+  if (typeof v === 'string' && v.length > 40) return v.substring(0, 38) + '…';
+  return v;
+}
+
+// Pick top 5 most interesting fields to highlight in sensor cards
+var HIGHLIGHT_KEYS = ['congestion_ratio','avg_speed','peak_drop','mae_60min','rain_speed_drop',
+  'morning_avg','evening_avg','weekend_avg','road_type','cluster',
+  'cong','spd','pd','m60','rd','ma','ea','we','road'];
+
+function cardFields(record) {
+  var keys = Object.keys(record);
+  // Pick highlights first, then fill remaining
+  var picked = [];
+  HIGHLIGHT_KEYS.forEach(function(k) {
+    if (keys.indexOf(k) >= 0 && picked.indexOf(k) < 0 && (record[k] !== null && record[k] !== undefined)) picked.push(k);
+  });
+  keys.forEach(function(k) {
+    if (picked.indexOf(k) < 0 && picked.length < 8 && (record[k] !== null && record[k] !== undefined)) picked.push(k);
+  });
+  return picked.slice(0, 8);
+}
+
+function buildSensorCards(records) {
+  if (!records || !records.length) return '<p style="color:#888;text-align:center;padding:12px">暂无数据</p>';
+  // Reasoning mode
+  if (records.length === 1 && (records[0].target || records[0].averages)) {
+    return '<pre style="font-size:11px;color:#aaa">' + JSON.stringify(records[0], null, 2) + '</pre>';
+  }
+
+  var isAggregate = !records[0].sid && !records[0].n && Object.keys(records[0]).length <= 4;
+  var isSensorList = records[0].sid !== undefined;
+
+  if (isSensorList) {
+    // Sensor card list
+    var html = '';
+    records.forEach(function(r, i) {
+      var fields = cardFields(r);
+      html += '<div class="sensor-card" style="background:#13182b;border:1px solid #1a2040;border-radius:8px;padding:10px 12px;margin-bottom:6px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      html += '<b style="color:#e94560;font-size:13px">传感器 #' + r.sid + '</b>';
+      if (r.road_type) html += '<span style="font-size:11px;color:#888">' + (SENSOR_ROAD_LABELS[r.road_type] || r.road_type) + '</span>';
+      if (r.cluster) html += '<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:rgba(233,69,96,0.15);color:#e94560">' + r.cluster + '</span>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:4px 10px">';
+      fields.forEach(function(k) {
+        var v = fmtVal(k, r[k]);
+        html += '<div><span style="color:#666;font-size:10px">' + cn(k) + '</span><br><span style="font-size:13px">' + v + '</span></div>';
+      });
+      if (r.road_type && r.lat) {
+        html += '<div style="margin-top:4px;font-size:10px;color:#555">坐标: ' + parseFloat(r.lat).toFixed(4) + ', ' + parseFloat(r.lon).toFixed(4) + '</div>';
+      }
+      html += '</div>';
+    });
+    return html;
+  }
+
+  // Other: clean table with Chinese headers
+  var keys = Object.keys(records[0]);
+  var t = '<table><thead><tr>';
+  keys.forEach(function(k) { t += '<th>' + cn(k) + '</th>'; });
+  t += '</tr></thead><tbody>';
+  records.forEach(function(r) {
+    t += '<tr>';
+    keys.forEach(function(k) { t += '<td><span class="val">' + fmtVal(k, r[k]) + '</span></td>'; });
+    t += '</tr>';
+  });
+  t += '</tbody></table>';
+  return t;
+}
+
+function addMsg(role, text, cypher, suggestions, records) {
+  var id = 'msg' + (++msgId);
+  var d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.id = id;
+
+  var extra = '';
+  var hasSource = cypher || (records && records.length);
+
+  if (hasSource) {
+    extra += '<button class="source-btn" onclick="toggleSource(\'' + id + '\')">查看来源</button>';
+  }
+
+  if (hasSource) {
+    extra += '<div class="source-panel" id="' + id + '-src">';
+    extra += '<div class="source-tabs">';
+    extra += '<button class="source-tab active" onclick="switchTab(\'' + id + '\',\'data\',this)">数据</button>';
+    extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'heatmap\',this)">时空热力</button>';
+    if (hasCoords(records)) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'map\',this)">地图</button>';
+    if (hasNumeric(records)) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'chart\',this)">图表</button>';
+    if (cypher) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'cypher\',this)">Cypher</button>';
+    extra += '</div>';
+
+    // Data tab (default visible)
+    extra += '<div class="source-content" id="' + id + '-data" style="display:block">' +
+      buildSensorCards(records) + '</div>';
+
+    // Heatmap tab
+    extra += '<div class="source-content" id="' + id + '-heatmap" style="display:none">' +
+      '<div class="heatmap-wrap"><canvas id="' + id + '-hm-canvas"></canvas></div>' +
+      '<div class="hm-legend"><span>慢/堵</span><div class="hm-legend-bar"></div><span>通畅</span><span style="margin-left:8px">圆圈大小 = 拥堵率, 连线 = 道路距离</span></div>' +
+      '<div class="hm-controls">' +
+      '<button class="hm-btn" id="' + id + '-hm-play" onclick="toggleHeatmap(\'' + id + '\')">播放</button>' +
+      '<span class="hm-time" id="' + id + '-hm-time">--</span>' +
+      '<input type="range" class="hm-slider" id="' + id + '-hm-slider" min="0" max="100" value="0" oninput="seekHeatmap(\'' + id + '\',this.value)">' +
+      '</div></div>';
+
+    // Map tab
+    extra += '<div class="source-content" id="' + id + '-map" style="display:none"></div>';
+
+    // Chart tab
+    extra += '<div class="source-content" id="' + id + '-chart" style="display:none"></div>';
+
+    // Cypher tab
+    extra += '<div class="source-content" id="' + id + '-cypher" style="display:none">' +
+      '<pre>' + (cypher || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></div>';
+
+    extra += '</div>';
+  }
+
   if (suggestions) {
-    extra += '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">';
-    suggestions.split('\n').filter(s=>s.trim()).forEach(s=>{
-      const clean = s.replace(/^[•·\\-\\s]+/,'').trim();
-      extra += `<span onclick="document.getElementById('q').value='${clean.replace(/'/g,"\\'")}';ask()" style="cursor:pointer;padding:4px 10px;border-radius:12px;border:1px solid #e94560;font-size:12px;color:#e94560;background:rgba(233,69,96,0.1)">${clean}</span>`;
+    extra += '<div class="suggestions">';
+    suggestions.split('\n').filter(function(s){return s.trim()}).forEach(function(s){
+      var clean = s.replace(/^[·\-\s]+/,'').trim();
+      extra += '<span onclick="document.getElementById(\'q\').value=\'' + clean.replace(/'/g,"\\'") + '\';ask()">' + clean + '</span>';
     });
     extra += '</div>';
   }
-  d.innerHTML = `<div class="avatar">${role==='user'?'你':'KG'}</div>
-    <div class="bubble">${text.replace(/\n/g,'<br>')}${extra}</div>`;
+
+  d.innerHTML = '<div class="avatar">' + (role==='user'?'你':'KG') + '</div>' +
+    '<div class="bubble">' + text.replace(/\n/g,'<br>') + extra + '</div>';
   document.getElementById('chat').appendChild(d);
   document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+
+  // Pre-render map and chart data so they're ready when tab is clicked
+  if (records && records.length) {
+    if (hasCoords(records)) buildMap(id, records);
+    if (hasNumeric(records)) buildChart(id, records, cypher);
+  }
+  // Init heatmap data loading (lazy, on first tab switch)
+  initHeatmap(id);
 }
+
+function toggleSource(id) {
+  var panel = document.getElementById(id + '-src');
+  var btn = document.getElementById(id).querySelector('.source-btn');
+  if (panel.classList.contains('show')) {
+    panel.classList.remove('show');
+    btn.classList.remove('active');
+  } else {
+    panel.classList.add('show');
+    btn.classList.add('active');
+    // Invalidate map/chart/heatmap size when panel opens
+    setTimeout(function() {
+      if (mapInstances[id]) mapInstances[id].invalidateSize();
+      if (chartInstances[id]) chartInstances[id].resize();
+      if (hmStates[id]) resizeHeatmap(id);
+    }, 200);
+  }
+  document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+}
+
+function switchTab(id, tab, el) {
+  var parent = document.getElementById(id + '-src');
+  parent.querySelectorAll('.source-tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+  parent.querySelectorAll('.source-content').forEach(function(c){ c.style.display = 'none'; });
+  var target = document.getElementById(id + '-' + tab);
+  if (target) target.style.display = 'block';
+  setTimeout(function() {
+    if (tab === 'map' && mapInstances[id]) mapInstances[id].invalidateSize();
+    if (tab === 'chart' && chartInstances[id]) chartInstances[id].resize();
+    if (tab === 'heatmap') startHeatmap(id);
+  }, 150);
+}
+
 function addLoading() {
-  const d = document.createElement('div');
+  var d = document.createElement('div');
   d.className = 'msg bot loading';
   d.id = 'loading';
-  d.innerHTML = `<div class="avatar">KG</div><div class="bubble"><div class="dots"><span></span><span></span><span></span></div></div>`;
+  d.innerHTML = '<div class="avatar">KG</div><div class="bubble"><div class="dots"><span></span><span></span><span></span></div></div>';
   document.getElementById('chat').appendChild(d);
   document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
 }
-function removeLoading() { const e = document.getElementById('loading'); if(e) e.remove(); }
+function removeLoading() { var e = document.getElementById('loading'); if(e) e.remove(); }
+
+// ============================================================
+// SPATIO-TEMPORAL HEATMAP MODULE
+// ============================================================
+var hmStates = {};   // { id: { playing, frame, totalFrames, data, animId, startSidMap } }
+var hmDataCache = null; // shared data from /api/timeseries
+
+function initHeatmap(id) {
+  // Just register; actual loading happens on first tab switch
+  hmStates[id] = { playing: false, frame: 0, data: null, animId: null };
+}
+
+function speedColor(speed, minV, maxV) {
+  // Map speed to color: low=red (#ef4444) -> mid=yellow (#eab308) -> high=green (#22c55e)
+  if (speed <= 0) return [100, 100, 100, 0.4]; // missing data: gray
+  var t = Math.max(0, Math.min(1, (speed - minV) / (maxV - minV)));
+  var r, g, b;
+  if (t < 0.5) {
+    // red -> yellow
+    var s = t / 0.5;
+    r = 239; g = Math.round(68 + s * (235 - 68)); b = 68;
+  } else {
+    // yellow -> green
+    var s = (t - 0.5) / 0.5;
+    r = Math.round(239 - s * (239 - 34)); g = Math.round(235 - s * (235 - 197)); b = 68;
+  }
+  return [r, g, b, 0.8];
+}
+
+function fetchHeatmapData(id) {
+  if (hmStates[id].data) return Promise.resolve(hmStates[id].data);
+  if (hmDataCache) {
+    hmStates[id].data = hmDataCache;
+    return Promise.resolve(hmDataCache);
+  }
+  return fetch('/api/timeseries').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.error) return null;
+    hmDataCache = d;
+    hmStates[id].data = d;
+    return d;
+  }).catch(function(e) { console.error('Heatmap load error:', e); return null; });
+}
+
+function startHeatmap(id) {
+  var st = hmStates[id];
+  if (!st || st.animId) return;
+  fetchHeatmapData(id).then(function(data) {
+    if (!data) return;
+    st.data = data;
+    st.totalFrames = data.speeds.length;
+    drawHeatmapFrame(id, st.frame);
+    updateHeatmapTime(id, st.frame);
+    var slider = document.getElementById(id + '-hm-slider');
+    if (slider) slider.max = st.totalFrames - 1;
+  });
+}
+
+function stopHeatmap(id) {
+  var st = hmStates[id];
+  if (!st) return;
+  if (st.animId) { cancelAnimationFrame(st.animId); st.animId = null; }
+  st.playing = false;
+  var btn = document.getElementById(id + '-hm-play');
+  if (btn) { btn.textContent = '播放'; btn.classList.remove('playing'); }
+}
+
+function toggleHeatmap(id) {
+  var st = hmStates[id];
+  if (!st || !st.data) return;
+  if (st.playing) { stopHeatmap(id); return; }
+  st.playing = true;
+  var btn = document.getElementById(id + '-hm-play');
+  if (btn) { btn.textContent = '暂停'; btn.classList.add('playing'); }
+  animateHeatmap(id);
+}
+
+function animateHeatmap(id) {
+  var st = hmStates[id];
+  if (!st || !st.playing || !st.data) return;
+  drawHeatmapFrame(id, st.frame);
+  updateHeatmapTime(id, st.frame);
+  var slider = document.getElementById(id + '-hm-slider');
+  if (slider) slider.value = st.frame;
+  st.frame = (st.frame + 1) % st.totalFrames;
+  st.animId = setTimeout(function() { animateHeatmap(id); }, 250);
+}
+
+function seekHeatmap(id, val) {
+  var st = hmStates[id];
+  if (!st || !st.data) { fetchHeatmapData(id).then(function() { if (hmStates[id] && hmStates[id].data) seekHeatmap(id, val); }); return; }
+  stopHeatmap(id);
+  st.frame = parseInt(val) % st.totalFrames;
+  drawHeatmapFrame(id, st.frame);
+  updateHeatmapTime(id, st.frame);
+}
+
+function updateHeatmapTime(id, frame) {
+  var st = hmStates[id];
+  if (!st || !st.data) return;
+  var el = document.getElementById(id + '-hm-time');
+  if (el) el.textContent = st.data.timestamps[frame] || ('#' + frame);
+}
+
+function drawHeatmapFrame(id, frame) {
+  var st = hmStates[id];
+  if (!st || !st.data) return;
+  var data = st.data;
+  var canvas = document.getElementById(id + '-hm-canvas');
+  if (!canvas) return;
+
+  var wrap = canvas.parentElement;
+  var w = wrap.clientWidth, h = 300;
+  canvas.width = w * (window.devicePixelRatio || 1);
+  canvas.height = h * (window.devicePixelRatio || 1);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+
+  // Background
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fillRect(0, 0, w, h);
+
+  var sensors = data.sensors;
+  var speeds = data.speeds[frame];
+  var minV = data.speedMin, maxV = data.speedMax;
+  var edges = data.edges;
+
+  // Build sensor lookup
+  if (!st._sidMap) {
+    st._sidMap = {};
+    sensors.forEach(function(s, i) { st._sidMap[s.sid] = i; });
+    // Map lat/lon to canvas coords
+    var lats = sensors.map(function(s) { return s.lat; });
+    var lons = sensors.map(function(s) { return s.lon; });
+    var pad = 25;
+    st._xScale = function(lon) { return pad + (lon - Math.min.apply(null, lons)) / (Math.max.apply(null, lons) - Math.min.apply(null, lons)) * (w - 2*pad); };
+    st._yScale = function(lat) { return pad + (Math.max.apply(null, lats) - lat) / (Math.max.apply(null, lats) - Math.min.apply(null, lats)) * (h - 2*pad); };
+    // Pre-calc positions
+    st._positions = sensors.map(function(s) { return { x: st._xScale(s.lon), y: st._yScale(s.lat) }; });
+    // Build edge list with canvas coords
+    st._edgeList = [];
+    edges.forEach(function(e) {
+      var fi = st._sidMap[e.from], ti = st._sidMap[e.to];
+      if (fi !== undefined && ti !== undefined) {
+        st._edgeList.push({ from: fi, to: ti, km: e.km });
+      }
+    });
+  }
+
+  // Draw edges
+  ctx.strokeStyle = 'rgba(15, 52, 96, 0.4)';
+  ctx.lineWidth = 0.5;
+  st._edgeList.forEach(function(e) {
+    var a = st._positions[e.from], b = st._positions[e.to];
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  });
+
+  // Draw nodes
+  var pos = st._positions;
+  var sidMap = st._sidMap;
+  for (var i = 0; i < sensors.length; i++) {
+    var spd = speeds[i];
+    var c = speedColor(spd, minV, maxV);
+    var radius = 3 + (1 - Math.max(0, Math.min(1, (spd - minV) / (maxV - minV)))) * 5; // bigger = slower/congested
+    ctx.beginPath();
+    ctx.arc(pos[i].x, pos[i].y, Math.max(2, radius), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + c[3] + ')';
+    ctx.fill();
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+}
+
+function resizeHeatmap(id) {
+  var st = hmStates[id];
+  if (!st || !st.data) return;
+  // Invalidate cached positions so they recalculate on next draw
+  st._sidMap = null;
+  st._positions = null;
+  st._edgeList = null;
+  drawHeatmapFrame(id, st.frame);
+}
+
+// ---- end heatmap module ----
 
 async function ask() {
-  const inp = document.getElementById('q');
-  const btn = document.getElementById('btn');
-  const q = inp.value.trim();
+  var inp = document.getElementById('q');
+  var btn = document.getElementById('btn');
+  var q = inp.value.trim();
   if (!q) return;
   addMsg('user', q);
   inp.value = '';
   btn.disabled = true;
   addLoading();
   try {
-    const r = await fetch('/api/query', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q}) });
-    const d = await r.json();
+    var r = await fetch('/api/query', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q}) });
+    var d = await r.json();
     removeLoading();
     if (d.error) addMsg('bot', '错误: ' + d.error);
-    else addMsg('bot', d.answer, d.cypher, d.suggestions);
+    else addMsg('bot', d.answer, d.cypher, d.suggestions, d.records);
   } catch(e) {
     removeLoading();
     addMsg('bot', '网络错误: ' + e.message);

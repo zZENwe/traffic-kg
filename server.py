@@ -1,5 +1,10 @@
 """Web chat UI for Traffic KG querying."""
 import json
+import re
+import os
+import numpy as np
+import h5py
+import pandas as pd
 from flask import Flask, request, jsonify, send_from_directory
 from neo4j import GraphDatabase
 from openai import OpenAI
@@ -13,6 +18,76 @@ DEEPSEEK_KEY = DEEPSEEK_KEY
 
 client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
 driver = GraphDatabase.driver(URI, auth=AUTH)
+
+# ---- Load time-series data for heatmap visualization ----
+TIMESERIES_CACHE = None
+
+def load_timeseries():
+    global TIMESERIES_CACHE
+    if TIMESERIES_CACHE:
+        return TIMESERIES_CACHE
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    h5_path = os.path.join(base, 'data', 'metr-la.h5')
+    csv_path = os.path.join(base, 'data', 'sensor_graph', 'graph_sensor_locations.csv')
+
+    if not os.path.exists(h5_path):
+        return None
+
+    # Load speed data and downsample to every 30min (6 steps of 5min)
+    with h5py.File(h5_path, 'r') as f:
+        vals = f['data/block0_values'][:]  # (34272, 207)
+        times_raw = f['data/axis1'][:]
+    times_ns = times_raw.astype(np.int64)
+    if times_ns[0] > 1e15:
+        times_s = times_ns / 1e9
+    else:
+        times_s = times_ns
+
+    # Downsample: every 6 steps = ~30min, pick a representative day (e.g. day 30)
+    step = 12  # ~1 hour intervals for smoother animation
+    vals_ds = vals[::step, :]  # (N_steps, 207)
+    times_ds = times_s[::step]
+
+    # Convert to list of timestamps
+    from datetime import datetime, timezone, timedelta
+    # PST = UTC-8 (LA in March is UTC-7 with DST, but timestamps are UTC)
+    timestamps = [datetime.fromtimestamp(t, tz=timezone.utc).strftime('%m/%d %H:%M') for t in times_ds[:288]]  # ~24h worth at 1h intervals
+
+    # Load sensor coordinates
+    sensors_df = pd.read_csv(csv_path, index_col=0)
+    sensors = [{"sid": int(sensors_df.iloc[i]['sensor_id']),
+                "lat": float(sensors_df.iloc[i]['latitude']),
+                "lon": float(sensors_df.iloc[i]['longitude'])}
+               for i in range(min(len(sensors_df), vals.shape[1]))]
+
+    # Build edges from top-3 nearest neighbors
+    coords = sensors_df[['latitude', 'longitude']].values
+    geo_dist = np.sqrt(
+        (coords[:, None, 0] - coords[None, :, 0]) ** 2 +
+        (coords[:, None, 1] - coords[None, :, 1]) ** 2
+    )
+    edges = []
+    n = len(sensors_df)
+    for i in range(n):
+        nearest = np.argsort(geo_dist[i])[1:4]  # top 3 neighbors
+        for j in nearest:
+            edges.append({"from": int(sensors_df.iloc[i]['sensor_id']),
+                          "to": int(sensors_df.iloc[int(j)]['sensor_id']),
+                          "km": round(float(geo_dist[i, j]), 3)})
+
+    # Speed data: limit to first 288 steps (~1 day at 1h) for manageable transfer
+    speeds = np.round(vals_ds[:288, :], 1).tolist()
+
+    TIMESERIES_CACHE = {
+        "sensors": sensors,
+        "edges": edges,
+        "speeds": speeds,
+        "timestamps": timestamps,
+        "speedMin": float(np.nanmin(vals_ds[:288])),
+        "speedMax": float(np.nanmax(vals_ds[:288])),
+    }
+    return TIMESERIES_CACHE
 
 SCHEMA = """你是Neo4j Cypher生成器。有207个Sensor节点和259个POI节点。
 
@@ -56,6 +131,10 @@ def call_llm(messages):
 def index():
     return send_from_directory('.', 'chat.html')
 
+@app.route('/heatmap')
+def heatmap_page():
+    return send_from_directory('.', 'heatmap.html')
+
 @app.route('/api/query', methods=['POST'])
 def query():
     question = request.json.get('question', '')
@@ -68,38 +147,53 @@ def query():
     if any(w in question for w in reason_keywords):
         with driver.session() as session:
             # Extract sensor ID if mentioned
-            import re
             sids = re.findall(r'\b(\d{5,6})\b', question)
-            sid_filter = f"WHERE s.sid = {sids[0]}" if sids else ""
+            target_sid = int(sids[0]) if sids else None
 
             # Run 4 comprehensive queries
             data = {}
 
             # 1. Target sensor(s) detail
-            r = session.run(f"""
-                MATCH (s:Sensor) {sid_filter if sid_filter else ''}
-                OPTIONAL MATCH (s)-[:NEAR]->(p:POI)
-                RETURN s.sid as sid, s.road_type as road, s.cluster as cluster,
-                       s.congestion_ratio as cong, s.peak_drop as pd,
-                       s.morning_avg as ma, s.evening_avg as ea, s.offpeak_avg as oa,
-                       s.weekday_avg as wd, s.weekend_avg as we,
-                       s.mae_15min as m15, s.mae_30min as m30, s.mae_60min as m60,
-                       s.rain_speed_drop as rd, s.rain_congestion_increase as rci,
-                       s.worst_hour as wh, s.worst_speed as ws,
-                       s.avg_speed as spd, s.description as desc,
-                       collect(p.name)[0..5] as pois
-                ORDER BY s.congestion_ratio DESC LIMIT 5
-            """)
+            if target_sid:
+                r = session.run("""
+                    MATCH (s:Sensor {sid: $sid})
+                    OPTIONAL MATCH (s)-[:NEAR]->(p:POI)
+                    RETURN s.sid as sid, s.road_type as road, s.cluster as cluster,
+                           s.congestion_ratio as cong, s.peak_drop as pd,
+                           s.morning_avg as ma, s.evening_avg as ea, s.offpeak_avg as oa,
+                           s.weekday_avg as wd, s.weekend_avg as we,
+                           s.mae_15min as m15, s.mae_30min as m30, s.mae_60min as m60,
+                           s.rain_speed_drop as rd, s.rain_congestion_increase as rci,
+                           s.worst_hour as wh, s.worst_speed as ws,
+                           s.avg_speed as spd, s.description as desc,
+                           collect(p.name)[0..5] as pois
+                    ORDER BY s.congestion_ratio DESC LIMIT 5
+                """, sid=target_sid)
+            else:
+                r = session.run("""
+                    MATCH (s:Sensor)
+                    OPTIONAL MATCH (s)-[:NEAR]->(p:POI)
+                    RETURN s.sid as sid, s.road_type as road, s.cluster as cluster,
+                           s.congestion_ratio as cong, s.peak_drop as pd,
+                           s.morning_avg as ma, s.evening_avg as ea, s.offpeak_avg as oa,
+                           s.weekday_avg as wd, s.weekend_avg as we,
+                           s.mae_15min as m15, s.mae_30min as m30, s.mae_60min as m60,
+                           s.rain_speed_drop as rd, s.rain_congestion_increase as rci,
+                           s.worst_hour as wh, s.worst_speed as ws,
+                           s.avg_speed as spd, s.description as desc,
+                           collect(p.name)[0..5] as pois
+                    ORDER BY s.congestion_ratio DESC LIMIT 5
+                """)
             data['target'] = r.data()
 
             # 2. Similar sensors for comparison
-            if sid_filter:
-                r = session.run(f"""
-                    MATCH (s:Sensor {{sid: {sids[0]}}})-[:SIMILAR_TO]->(t:Sensor)
+            if target_sid:
+                r = session.run("""
+                    MATCH (s:Sensor {sid: $sid})-[:SIMILAR_TO]->(t:Sensor)
                     RETURN t.sid as sid, t.cluster as cluster, t.congestion_ratio as cong,
                            t.peak_drop as pd, t.rain_speed_drop as rd
                     LIMIT 5
-                """)
+                """, sid=target_sid)
                 data['similar'] = r.data()
 
             # 3. Road type & cluster averages
@@ -147,7 +241,8 @@ def query():
             parts = answer.split('---', 1)
             main = parts[0].strip()
             sug = parts[1].strip() if len(parts) > 1 else ''
-            return jsonify({'answer': main, 'cypher': '多查询综合分析', 'suggestions': sug})
+            return jsonify({'answer': main, 'cypher': '多查询综合分析', 'suggestions': sug,
+                            'records': [data]})
 
     # === Phase 1: Keyword-based Cypher templates (100% reliable for common queries) ===
     cypher = None
@@ -277,7 +372,15 @@ def query():
         'answer': main_answer,
         'cypher': cypher,
         'suggestions': suggestions,
+        'records': records[:20],
     })
+
+@app.route('/api/timeseries')
+def timeseries():
+    data = load_timeseries()
+    if data is None:
+        return jsonify({'error': 'METR-LA HDF5 data not found'})
+    return jsonify(data)
 
 if __name__ == '__main__':
     print("启动服务: http://localhost:7070")
