@@ -138,13 +138,12 @@ def heatmap_page():
 @app.route('/api/query', methods=['POST'])
 def query():
     question = request.json.get('question', '')
+    reasoning = request.json.get('reasoning', False)
     if not question:
         return jsonify({'error': 'empty question'})
 
-    # === Reasoning Mode: multi-query deep analysis ===
-    reason_keywords = ['为什么', '原因', '分析', '推理', '怎么回事', '如何', '怎么这么',
-                       '风险', '危险', '建议', '改进', '对比', '综合', '深度']
-    if any(w in question for w in reason_keywords):
+    # === Reasoning Mode: multi-query deep analysis (manual toggle) ===
+    if reasoning:
         with driver.session() as session:
             # Extract sensor ID if mentioned
             sids = re.findall(r'\b(\d{5,6})\b', question)
@@ -373,6 +372,91 @@ def query():
         'cypher': cypher,
         'suggestions': suggestions,
         'records': records[:20],
+    })
+
+@app.route('/api/extract_text', methods=['POST'])
+def extract_text():
+    """Extract entities & relationships from unstructured text via LLM and store in Neo4j."""
+    text = (request.json.get('text', '') or '').strip()
+    if not text:
+        return jsonify({'error': 'empty text'})
+
+    # Get existing schema for context
+    with driver.session() as session:
+        labels = [r[0] for r in session.run("CALL db.labels()").values()]
+        rels = [r[0] for r in session.run("CALL db.relationshipTypes()").values()]
+
+    # LLM prompt to extract structured knowledge
+    extract_prompt = f"""你是一个知识图谱抽取器。从以下文本中提取实体和关系。
+
+=== 已有的图Schema ===
+节点标签: {labels}
+关系类型: {rels}
+
+=== 规则 ===
+1. 识别文本中的实体(人物、地点、组织、事件、概念等)
+2. 为每个实体分配type(用已有的标签，或新建)
+3. 提取实体间的关系
+4. 为实体添加描述和关键属性
+5. 返回严格JSON: {{"entities":[{{"name":"...","type":"Type","props":{{"key":"value"}}}}],"relations":[{{"from":"实体name","type":"REL_TYPE","to":"实体name","props":{{}}}}]}}
+
+=== 文本 ===
+{text[:3000]}
+
+只返回JSON:"""
+
+    try:
+        resp = call_llm([{"role": "user", "content": extract_prompt}])
+        resp = resp.strip()
+        if resp.startswith("```"):
+            resp = resp.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        data = json.loads(resp)
+    except Exception as e:
+        return jsonify({'error': f'LLM解析失败: {e}', 'raw': resp[:200]})
+
+    entities = data.get('entities', [])
+    relations = data.get('relations', [])
+    if not entities:
+        return jsonify({'error': '未能从文本中提取到实体'})
+
+    # Store in Neo4j
+    node_count, rel_count = 0, 0
+    with driver.session() as session:
+        for ent in entities:
+            ent_type = ent.get('type', 'Entity')
+            # Sanitize label (Neo4j labels can't have spaces)
+            safe_type = ent_type.replace(' ', '_').replace('-', '_')
+            props = ent.get('props', {}) or {}
+            props['name'] = ent['name']
+            props['description'] = ent.get('description', '')
+            props['source'] = 'llm_extract'
+            session.run(f"""
+                MERGE (n:{safe_type} {{name: $name}})
+                SET n += $props
+            """, name=ent['name'], props=props)
+            node_count += 1
+
+        for rel in relations:
+            from_name = rel.get('from', '')
+            to_name = rel.get('to', '')
+            rel_type = rel.get('type', 'RELATED')
+            safe_rel = rel_type.replace(' ', '_').upper()
+            r_props = rel.get('props', {}) or {}
+            try:
+                session.run(f"""
+                    MATCH (a {{name: $from_name}}), (b {{name: $to_name}})
+                    MERGE (a)-[r:{safe_rel}]->(b)
+                    SET r += $props
+                """, from_name=from_name, to_name=to_name, props=r_props)
+                rel_count += 1
+            except Exception:
+                pass
+
+    return jsonify({
+        'message': f'成功抽取 {node_count} 个实体、{rel_count} 条关系',
+        'entities': node_count,
+        'relations': rel_count,
+        'preview': entities[:5],
     })
 
 @app.route('/api/timeseries')

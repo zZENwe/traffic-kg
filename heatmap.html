@@ -98,6 +98,10 @@ function loadData() {
     DATA = d;
     state.total = d.speeds.length;
     state.frame = 0;
+    // Get canvas size first, then build geometry
+    var wrap = document.getElementById('canvas-wrap');
+    state.w = wrap.clientWidth;
+    state.h = Math.round(state.w * 0.65);
     buildGeometry();
     draw();
 
@@ -245,7 +249,12 @@ function goFullscreen() {
   else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
 }
 
-function resize() { buildGeometry(); draw(); updateStats(state.frame); }
+function resize() {
+  var wrap = document.getElementById('canvas-wrap');
+  state.w = wrap.clientWidth;
+  state.h = Math.round(state.w * 0.65);
+  buildGeometry(); draw(); updateStats(state.frame);
+}
 window.addEventListener('resize', resize);
 
 // Keyboard shortcuts

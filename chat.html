@@ -6,7 +6,6 @@
 <title>交通时空知识图谱 - 智能查询</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
@@ -36,7 +35,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
   cursor: pointer; background: #0a0e1a; border: none; transition: all 0.2s; }
 .source-tab:hover { color: #ccc; }
 .source-tab.active { color: #e94560; border-bottom: 2px solid #e94560; }
-.source-content { padding: 10px 12px; max-height: 280px; overflow: auto; }
+.source-content { padding: 10px 12px; max-height: 500px; overflow: auto; }
 .source-content pre { font-size: 11px; line-height: 1.5; color: #aaa; white-space: pre-wrap;
   word-break: break-all; margin: 0; font-family: 'Consolas','Courier New',monospace; }
 .source-content table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -44,10 +43,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
   font-weight: 500; border-bottom: 1px solid #0f3460; position: sticky; top: 0; }
 .source-content td { padding: 3px 8px; border-bottom: 1px solid #0f3460; color: #aaa; }
 .source-content .val { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-container { height: 260px; width: 100%; border-radius: 6px; }
-.chart-container { position: relative; height: 250px; width: 100%; }
-.chart-container canvas { max-height: 250px; }
-.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.map-container { height: 260px; width: 100%; border-radius: 6px; }.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .suggestions span { cursor: pointer; padding: 4px 10px; border-radius: 12px;
   border: 1px solid #e94560; font-size: 12px; color: #e94560;
   background: rgba(233,69,96,0.1); transition: all 0.2s; }
@@ -56,7 +52,7 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
 .loading .dots span:nth-child(1) { animation-delay: -0.32s; }
 .loading .dots span:nth-child(2) { animation-delay: -0.16s; }
 @keyframes dot { 0%,80%,100% { transform: scale(0); } 40% { transform: scale(1); } }
-.heatmap-wrap { position: relative; width: 100%; height: 300px; background: #0a0e1a; border-radius: 6px; overflow: hidden; }
+.heatmap-wrap { position: relative; width: 100%; height: 420px; background: #0a0e1a; border-radius: 6px; overflow: hidden; }
 .heatmap-wrap canvas { display: block; }
 .hm-controls { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #0f1425; border-top: 1px solid #1a2040; }
 .hm-btn { padding: 4px 14px; border-radius: 12px; border: 1px solid #0f3460; background: #16213e; color: #ccc; font-size: 12px; cursor: pointer; transition: all 0.2s; }
@@ -78,36 +74,38 @@ body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #1
 <body>
 <div class="header">
   <h1>交通时空知识图谱</h1>
-  <span>207个LA传感器 · DeepSeek · Neo4j · DCRNN</span>
+  <span>207个LA传感器 · DeepSeek · Neo4j · DCRNN · <a href="#" onclick="toggleExtract()" style="color:#e94560;text-decoration:none">知识抽取</a></span>
+</div>
+<div id="extract-panel" style="display:none;background:#13182b;border-bottom:1px solid #0f3460;padding:14px 20px">
+  <div style="font-size:13px;color:#e94560;margin-bottom:8px">粘贴非结构化文本，LLM自动抽取实体和关系存入Neo4j</div>
+  <textarea id="extract-text" placeholder="粘贴文章、新闻、对话等任意文本..." style="width:100%;height:80px;padding:10px;border-radius:8px;border:1px solid #0f3460;background:#0a0e1a;color:#eee;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+  <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+    <button onclick="doExtract()" style="padding:6px 18px;border-radius:14px;border:none;background:#e94560;color:#fff;font-size:13px;cursor:pointer">开始抽取</button>
+    <span id="extract-status" style="font-size:12px;color:#888"></span>
+  </div>
 </div>
 <div class="chat" id="chat">
   <div class="msg bot">
     <div class="avatar">KG</div>
-    <div class="bubble">你好！我是交通时空知识图谱助手。<br>可以问我传感器、道路类型、预测误差、POI 等问题。<br><br>试试：<br>· "高速公路传感器平均误差多少？"<br>· "预测最难的5个传感器在哪？"<br>· "周边餐厅最多的传感器？"</div>
+    <div class="bubble">你好！我是交通时空知识图谱助手，覆盖LA 207个传感器、259个POI。<br><br>试试问我：<br>· "最拥堵的10个传感器在哪？"<br>· "下雨天哪些路段受影响最大？"<br>· "和传感器773869模式相似的还有哪些？"<br>· "早高峰和晚高峰哪个更堵？"<br>· "预测60分钟后最不准的传感器有哪些？"<br><br>勾选左下角「深度推理」可获得多维度分析。</div>
   </div>
 </div>
 <div class="input-area">
+  <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#888;cursor:pointer;white-space:nowrap">
+    <input type="checkbox" id="reasoning-toggle" style="accent-color:#e94560"> 深度推理
+  </label>
   <input id="q" placeholder="输入中文问题..." onkeydown="if(event.key==='Enter')ask()">
   <button id="btn" onclick="ask()">发送</button>
+  <button onclick="window.open('/heatmap','_blank')" style="background:#0f3460;white-space:nowrap" title="全屏时空热力图">热力图</button>
 </div>
 <script>
 var msgId = 0;
-var chartInstances = {};  // per-message chart refs
 var mapInstances = {};    // per-message map refs
 
 function hasCoords(records) {
   if (!records || !records.length) return false;
   var r = records[0];
   return (r.lat && r.lon) || (r.latitude && r.longitude);
-}
-
-function hasNumeric(records) {
-  if (!records || !records.length) return false;
-  var r = records[0];
-  var numKeys = Object.keys(r).filter(function(k) {
-    return typeof r[k] === 'number' && k !== 'sid' && k !== 'lat' && k !== 'lon' && k !== 'latitude' && k !== 'longitude';
-  });
-  return numKeys.length >= 1;
 }
 
 function buildMap(id, records) {
@@ -158,58 +156,6 @@ function formatTopValue(r) {
   return '';
 }
 
-function buildChart(id, records, cypher) {
-  var numKeys = Object.keys(records[0]).filter(function(k) {
-    return typeof records[0][k] === 'number' && k !== 'sid' && k !== 'lat' && k !== 'lon' && k !== 'latitude' && k !== 'longitude';
-  });
-  if (!numKeys.length) {
-    // Try sid as label + one numeric
-    var keys = Object.keys(records[0]);
-    var numK = keys.filter(function(k) { return typeof records[0][k] === 'number'; });
-    var labelK = keys.filter(function(k) { return k === 'sid' || k === 'road_type' || k === 'cluster' || k === 'h' || k === 'road' || k === 'type'; });
-    if (!numK.length || !labelK.length) return false;
-    numKeys = numK;
-  }
-
-  setTimeout(function() {
-    var chartDiv = document.getElementById(id + '-chart');
-    if (!chartDiv) return;
-    chartDiv.innerHTML = '<div class="chart-container"><canvas id="' + id + '-canvas"></canvas></div>';
-    var ctx = document.getElementById(id + '-canvas').getContext('2d');
-
-    var labels = records.map(function(r) { return r.sid || cn(r.road_type || r.cluster || r.road || r.h || r.type) || '#'; });
-    var key = numKeys[0];
-
-    if (chartInstances[id]) chartInstances[id].destroy();
-    chartInstances[id] = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: cn(key),
-          data: records.map(function(r) { return r[key]; }),
-          backgroundColor: records.map(function(_, i) {
-            return 'hsla(' + (350 + i * 15 % 30) + ', 70%, 55%, 0.75)';
-          }),
-          borderColor: 'rgba(233,69,96,0.6)',
-          borderWidth: 1,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { labels: { color: '#888', font: { size: 11 } } }
-        },
-        scales: {
-          x: { ticks: { color: '#888', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1a1a3e' } },
-          y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#1a1a3e' } }
-        }
-      }
-    });
-  }, 100);
-  return true;
-}
 
 // Chinese labels & units for all Neo4j sensor fields
 var LABEL_CN = {
@@ -348,10 +294,19 @@ function addMsg(role, text, cypher, suggestions, records) {
   if (hasSource) {
     extra += '<div class="source-panel" id="' + id + '-src">';
     extra += '<div class="source-tabs">';
+    // Extract sensor IDs from records for heatmap highlighting
+    var highlightSids = [];
+    if (records) {
+      records.forEach(function(r) {
+        // Neo4j may return keys like 'sid' or 's.sid'
+        var sid = Number(r.sid || r['s.sid'] || 0);
+        if (sid > 0) highlightSids.push(sid);
+      });
+    }
+
     extra += '<button class="source-tab active" onclick="switchTab(\'' + id + '\',\'data\',this)">数据</button>';
     extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'heatmap\',this)">时空热力</button>';
     if (hasCoords(records)) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'map\',this)">地图</button>';
-    if (hasNumeric(records)) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'chart\',this)">图表</button>';
     if (cypher) extra += '<button class="source-tab" onclick="switchTab(\'' + id + '\',\'cypher\',this)">Cypher</button>';
     extra += '</div>';
 
@@ -371,9 +326,6 @@ function addMsg(role, text, cypher, suggestions, records) {
 
     // Map tab
     extra += '<div class="source-content" id="' + id + '-map" style="display:none"></div>';
-
-    // Chart tab
-    extra += '<div class="source-content" id="' + id + '-chart" style="display:none"></div>';
 
     // Cypher tab
     extra += '<div class="source-content" id="' + id + '-cypher" style="display:none">' +
@@ -396,13 +348,12 @@ function addMsg(role, text, cypher, suggestions, records) {
   document.getElementById('chat').appendChild(d);
   document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
 
-  // Pre-render map and chart data so they're ready when tab is clicked
+  // Pre-render map data
   if (records && records.length) {
     if (hasCoords(records)) buildMap(id, records);
-    if (hasNumeric(records)) buildChart(id, records, cypher);
   }
-  // Init heatmap data loading (lazy, on first tab switch)
-  initHeatmap(id);
+  // Init heatmap with highlighted sensor IDs from query results
+  initHeatmap(id, highlightSids);
 }
 
 function toggleSource(id) {
@@ -414,10 +365,9 @@ function toggleSource(id) {
   } else {
     panel.classList.add('show');
     btn.classList.add('active');
-    // Invalidate map/chart/heatmap size when panel opens
+    // Invalidate map/heatmap size when panel opens
     setTimeout(function() {
       if (mapInstances[id]) mapInstances[id].invalidateSize();
-      if (chartInstances[id]) chartInstances[id].resize();
       if (hmStates[id]) resizeHeatmap(id);
     }, 200);
   }
@@ -433,7 +383,6 @@ function switchTab(id, tab, el) {
   if (target) target.style.display = 'block';
   setTimeout(function() {
     if (tab === 'map' && mapInstances[id]) mapInstances[id].invalidateSize();
-    if (tab === 'chart' && chartInstances[id]) chartInstances[id].resize();
     if (tab === 'heatmap') startHeatmap(id);
   }, 150);
 }
@@ -448,15 +397,63 @@ function addLoading() {
 }
 function removeLoading() { var e = document.getElementById('loading'); if(e) e.remove(); }
 
+function toggleExtract() {
+  var p = document.getElementById('extract-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+async function doExtract() {
+  var ta = document.getElementById('extract-text');
+  var st = document.getElementById('extract-status');
+  var text = ta.value.trim();
+  if (!text) { st.textContent = '请先粘贴文本'; return; }
+  if (text.length < 20) { st.textContent = '文本太短，至少20字'; return; }
+  st.textContent = '抽取中...';
+  try {
+    var r = await fetch('/api/extract_text', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text}) });
+    var d = await r.json();
+    if (d.error) { st.textContent = '失败: ' + d.error; return; }
+    st.textContent = d.message;
+    ta.value = '';
+    addMsg('bot', '知识抽取完成：' + d.message + '<br><br>预览：<pre style="font-size:11px;color:#aaa">' + JSON.stringify(d.preview,null,2).replace(/</g,'&lt;') + '</pre>');
+  } catch(e) {
+    st.textContent = '网络错误: ' + e.message;
+  }
+}
+
 // ============================================================
 // SPATIO-TEMPORAL HEATMAP MODULE
 // ============================================================
+function drawStar(ctx, cx, cy, innerR, outerR, rot) {
+  var spikes = 5;
+  var step = Math.PI / spikes;
+  ctx.save();
+  ctx.beginPath();
+  for (var i = 0; i < spikes * 2; i++) {
+    var r = (i % 2 === 0) ? outerR : innerR;
+    var a = rot + i * step;
+    var x = cx + Math.cos(a) * r;
+    var y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(233,69,96,0.25)';
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(233,69,96,0.6)';
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+  ctx.restore();
+}
+
 var hmStates = {};   // { id: { playing, frame, totalFrames, data, animId, startSidMap } }
 var hmDataCache = null; // shared data from /api/timeseries
 
-function initHeatmap(id) {
-  // Just register; actual loading happens on first tab switch
-  hmStates[id] = { playing: false, frame: 0, data: null, animId: null };
+function initHeatmap(id, highlightSids) {
+  hmStates[id] = { playing: false, frame: 0, data: null, animId: null, highlight: highlightSids || [] };
 }
 
 function speedColor(speed, minV, maxV) {
@@ -614,10 +611,24 @@ function drawHeatmapFrame(id, frame) {
   // Draw nodes
   var pos = st._positions;
   var sidMap = st._sidMap;
+  var hlSet = {};
+  (st.highlight || []).forEach(function(s) { hlSet[Number(s)] = true; });
+
+  // If we have highlights, compute center for zoom
+  var hlCenter = null;
+  if (st.highlight && st.highlight.length) {
+    var cx = 0, cy = 0, cnt = 0;
+    st.highlight.forEach(function(sid) {
+      var idx = sidMap[sid];
+      if (idx !== undefined) { cx += pos[idx].x; cy += pos[idx].y; cnt++; }
+    });
+    if (cnt > 0) hlCenter = { x: cx / cnt, y: cy / cnt };
+  }
+
   for (var i = 0; i < sensors.length; i++) {
     var spd = speeds[i];
     var c = speedColor(spd, minV, maxV);
-    var radius = 3 + (1 - Math.max(0, Math.min(1, (spd - minV) / (maxV - minV)))) * 5; // bigger = slower/congested
+    var radius = 3 + (1 - Math.max(0, Math.min(1, (spd - minV) / (maxV - minV)))) * 5;
     ctx.beginPath();
     ctx.arc(pos[i].x, pos[i].y, Math.max(2, radius), 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + c[3] + ')';
@@ -626,6 +637,19 @@ function drawHeatmapFrame(id, frame) {
     ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 0.5;
     ctx.stroke();
+
+    // Star marker for query-relevant sensors
+    if (hlSet[sensors[i].sid]) {
+      drawStar(ctx, pos[i].x, pos[i].y, Math.max(2, radius) + 6, Math.max(2, radius) + 10, 0.3);
+    }
+  }
+
+  // Draw label near highlight center
+  if (hlCenter) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText((st.highlight || []).length + '个相关传感器', hlCenter.x, hlCenter.y - 16);
   }
 }
 
@@ -651,7 +675,8 @@ async function ask() {
   btn.disabled = true;
   addLoading();
   try {
-    var r = await fetch('/api/query', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q}) });
+    var reason = document.getElementById('reasoning-toggle').checked;
+    var r = await fetch('/api/query', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q, reasoning:reason}) });
     var d = await r.json();
     removeLoading();
     if (d.error) addMsg('bot', '错误: ' + d.error);
